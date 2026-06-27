@@ -34,7 +34,7 @@ static void publish_status(void) {
              "{\"rpm\":%.2f,\"running\":%s}",
              stepper_get_rpm(),
              stepper_is_running() ? "true" : "false");
-    esp_mqtt_client_enqueue(mqtt_client, MqttStatus, payload, 0, 0, 0, false);
+    esp_mqtt_client_enqueue(mqtt_client, MqttStatus, payload, 0, 1, 0, true);
 }
 
 // ---------------------------------------------------------------------------
