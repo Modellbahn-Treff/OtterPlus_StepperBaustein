@@ -189,7 +189,7 @@ static void configure_pin(int idx) {
         return;
     }
 
-    gpio_intr_type_t intr;
+    gpio_int_type_t intr;
     if (cfg->mode == PIN_MODE_SWITCH || cfg->mode == PIN_MODE_SWITCH_INV) {
         intr = GPIO_INTR_ANYEDGE;
     } else {
