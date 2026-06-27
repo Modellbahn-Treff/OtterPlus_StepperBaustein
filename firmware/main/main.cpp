@@ -6,6 +6,7 @@
 #include "esp_netif.h"
 #include "esp_log.h"
 #include "mqtt_client.h"
+#include "driver/gpio.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,6 +23,28 @@ esp_mqtt_client_handle_t mqtt_client = nullptr;
 
 static bool s_wifi_ok = false;
 static bool s_mqtt_ok = false;
+static char s_ip_str[16] = "---";
+
+// ---------------------------------------------------------------------------
+// Screen button — GPIO26, active-low
+// ---------------------------------------------------------------------------
+
+static volatile bool s_screen_btn_flag = false;
+
+static void IRAM_ATTR screen_btn_isr(void *) {
+    s_screen_btn_flag = true;
+}
+
+static void setup_screen_button(void) {
+    gpio_config_t io = {};
+    io.pin_bit_mask = (1ULL << GPIO_NUM_26);
+    io.mode         = GPIO_MODE_INPUT;
+    io.pull_up_en   = GPIO_PULLUP_ENABLE;
+    io.pull_down_en = GPIO_PULLDOWN_DISABLE;
+    io.intr_type    = GPIO_INTR_NEGEDGE;
+    gpio_config(&io);
+    gpio_isr_handler_add(GPIO_NUM_26, screen_btn_isr, nullptr);
+}
 
 // ---------------------------------------------------------------------------
 // Publish current motor state to MqttStatus
@@ -169,7 +192,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
         esp_wifi_connect();
     } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)event_data;
-        ESP_LOGI(TAG, "WiFi connected, IP: " IPSTR, IP2STR(&ev->ip_info.ip));
+        snprintf(s_ip_str, sizeof(s_ip_str), IPSTR, IP2STR(&ev->ip_info.ip));
+        ESP_LOGI(TAG, "WiFi connected, IP: %s", s_ip_str);
         s_wifi_ok = true;
         esp_mqtt_client_start(mqtt_client);
     }
@@ -220,6 +244,7 @@ extern "C" void app_main(void) {
     display_init();
     stepper_init();
     gpio_inputs_init();
+    setup_screen_button();
 
     // Apply after-boot behaviour
     switch (boot_behaviour) {
@@ -245,8 +270,17 @@ extern "C" void app_main(void) {
     serial_config_start();
 
     // Main loop — refresh display every 250 ms
+    TickType_t s_screen_btn_last = 0;
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(250));
-        display_update(stepper_get_rpm(), stepper_is_running(), s_wifi_ok, s_mqtt_ok);
+        if (s_screen_btn_flag) {
+            s_screen_btn_flag = false;
+            TickType_t now = xTaskGetTickCount();
+            if ((now - s_screen_btn_last) >= pdMS_TO_TICKS(400)) {
+                s_screen_btn_last = now;
+                display_next_screen();
+            }
+        }
+        display_update(stepper_get_rpm(), stepper_is_running(), s_wifi_ok, s_mqtt_ok, s_ip_str);
     }
 }

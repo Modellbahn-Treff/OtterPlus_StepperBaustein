@@ -1,4 +1,5 @@
 #include "display.h"
+#include "settings.h"
 #include "driver/i2c.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -201,6 +202,27 @@ static void oled_clear_eol(uint8_t page, uint8_t col) {
 }
 
 // ---------------------------------------------------------------------------
+// Screen state
+// ---------------------------------------------------------------------------
+
+typedef enum {
+    SCREEN_MOTOR   = 0,
+    SCREEN_NETWORK = 1,
+    SCREEN_CONFIG  = 2,
+    SCREEN_COUNT   = 3,
+} display_screen_t;
+
+static display_screen_t s_screen = SCREEN_MOTOR;
+
+static void oled_clear_content(void) {
+    static const uint8_t zeros[OLED_W] = {};
+    for (uint8_t p = 1; p < OLED_PAGES; p++) {
+        oled_set_pos(p, 0);
+        oled_write_data(zeros, OLED_W);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -257,33 +279,102 @@ void display_init(void) {
     ESP_LOGI(TAG, "SSD1306 initialised");
 }
 
-void display_update(float rpm, bool running, bool wifi_ok, bool mqtt_ok) {
+void display_next_screen(void) {
+    if (!s_ok) return;
+    s_screen = (display_screen_t)((s_screen + 1) % SCREEN_COUNT);
+    oled_clear_content();
+}
+
+void display_update(float rpm, bool running, bool wifi_ok, bool mqtt_ok, const char *ip_str) {
     if (!s_ok) return;
 
     char buf[24];
     uint8_t col;
 
-    // Row 2: speed value
-    oled_draw_str(2, 0, "Speed:");
-    snprintf(buf, sizeof(buf), "%.2f rpm  ", rpm < 0 ? -rpm : rpm);
-    col = oled_draw_str(2, 42, buf);
-    oled_clear_eol(2, col);
+    switch (s_screen) {
 
-    // Row 3: direction
-    oled_draw_str(3, 0, "Dir:  ");
-    if (!running) {
-        oled_draw_str(3, 42, "---  ");
-    } else if (rpm >= 0) {
-        oled_draw_str(3, 42, "FWD  ");
-    } else {
-        oled_draw_str(3, 42, "BWD  ");
+        case SCREEN_MOTOR:
+            // Row 2: speed value
+            oled_draw_str(2, 0, "Speed:");
+            snprintf(buf, sizeof(buf), "%.2f rpm  ", rpm < 0 ? -rpm : rpm);
+            col = oled_draw_str(2, 42, buf);
+            oled_clear_eol(2, col);
+
+            // Row 3: direction
+            oled_draw_str(3, 0, "Dir:  ");
+            if (!running)    oled_draw_str(3, 42, "---  ");
+            else if (rpm >= 0) oled_draw_str(3, 42, "FWD  ");
+            else               oled_draw_str(3, 42, "BWD  ");
+
+            // Row 4: motor status
+            oled_draw_str(4, 0, "Motor:");
+            oled_draw_str(4, 42, running ? "RUN  " : "STOP ");
+
+            // Row 6: connectivity
+            oled_draw_str(6, 0,  wifi_ok ? "WiFi:OK  " : "WiFi:--  ");
+            oled_draw_str(6, 66, mqtt_ok ? "MQTT:OK" : "MQTT:--");
+            break;
+
+        case SCREEN_NETWORK:
+            // Row 2: WiFi status
+            oled_draw_str(2, 0, "WiFi: ");
+            col = oled_draw_str(2, 36, wifi_ok ? "OK   " : "--   ");
+            oled_clear_eol(2, col);
+
+            // Row 3: IP address
+            oled_draw_str(3, 0, "IP:   ");
+            col = oled_draw_str(3, 36, ip_str ? ip_str : "---");
+            oled_clear_eol(3, col);
+
+            // Row 4: MQTT broker
+            oled_draw_str(4, 0, "MQTT: ");
+            col = oled_draw_str(4, 36, mqtt_server);
+            oled_clear_eol(4, col);
+
+            // Row 5: device ID
+            oled_draw_str(5, 0, "ID:   ");
+            col = oled_draw_str(5, 36, client_name);
+            oled_clear_eol(5, col);
+            break;
+
+        case SCREEN_CONFIG: {
+            // Row 2: steps per revolution
+            oled_draw_str(2, 0, "Steps:");
+            snprintf(buf, sizeof(buf), "%u    ", steps_per_rev);
+            col = oled_draw_str(2, 42, buf);
+            oled_clear_eol(2, col);
+
+            // Row 3: run current
+            oled_draw_str(3, 0, "Irun: ");
+            snprintf(buf, sizeof(buf), "%u    ", irun);
+            col = oled_draw_str(3, 42, buf);
+            oled_clear_eol(3, col);
+
+            // Row 4: hold current
+            oled_draw_str(4, 0, "Ihold:");
+            snprintf(buf, sizeof(buf), "%u    ", ihold);
+            col = oled_draw_str(4, 42, buf);
+            oled_clear_eol(4, col);
+
+            // Row 5: boot behavior
+            oled_draw_str(5, 0, "Boot: ");
+            const char *boot_str;
+            switch (boot_behaviour) {
+                case BOOT_START:      boot_str = "START"; break;
+                case BOOT_LAST_STATE: boot_str = "LAST "; break;
+                default:              boot_str = "STOP "; break;
+            }
+            col = oled_draw_str(5, 42, boot_str);
+            oled_clear_eol(5, col);
+            break;
+        }
+
+        default:
+            break;
     }
 
-    // Row 4: motor status
-    oled_draw_str(4, 0, "Motor:");
-    oled_draw_str(4, 42, running ? "RUN  " : "STOP ");
-
-    // Row 6: connectivity icons
-    oled_draw_str(6, 0,  wifi_ok ? "WiFi:OK  " : "WiFi:--  ");
-    oled_draw_str(6, 66, mqtt_ok ? "MQTT:OK" : "MQTT:--");
+    // Row 7: page indicator centered
+    snprintf(buf, sizeof(buf), "< %d/%d >", s_screen + 1, (int)SCREEN_COUNT);
+    uint8_t ind_col = (OLED_W - (uint8_t)(strlen(buf) * 6)) / 2;
+    oled_draw_str(7, ind_col, buf);
 }
