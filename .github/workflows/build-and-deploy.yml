@@ -48,6 +48,7 @@ jobs:
           cp firmware/build/otter_stepper.bin deploy/
           cp firmware/build/bootloader/bootloader.bin deploy/
           cp firmware/build/partition_table/partition-table.bin deploy/
+          cp NOTICE deploy/
 
       - name: Inject version into manifest
         run: |
