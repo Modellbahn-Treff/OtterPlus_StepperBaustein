@@ -1,6 +1,6 @@
 {
   "name": "Otter StepperBaustein",
-  "version": "c1327b2",
+  "version": "1f73cd3",
   "builds": [
     {
       "chipFamily": "ESP32",
