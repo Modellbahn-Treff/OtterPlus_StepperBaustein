@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Modellbahn-Treff for Kids GmbH
+
 #include "stepper.h"
 #include "settings.h"
 #include "driver/uart.h"
